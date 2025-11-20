@@ -36,17 +36,20 @@ function test_dev_full_write() {
         return 2;
     }
     
+    error_clear_last();
+    
     try {
         $bytes_written = file_put_contents($TARGET, $DATA);
-        if ($bytes_written === false) {
-            $error = error_get_last();
-            if (strpos($error['message'], 'No space left on device') !== false) {
+        $error = error_get_last();
+        
+        if ($bytes_written === false || $error !== null) {
+            if (strpos($error['message'] ?? '', 'No space left on device') !== false) {
                 echo "✓ Expected failure: Disk full simulation successful.\n";
                 echo "  Error: " . $error['message'] . "\n";
                 return 0;
             } else {
                 echo "✗ Write failed with unexpected error.\n";
-                echo "  Error: " . $error['message'] . "\n";
+                echo "  Error: " . ($error['message'] ?? 'Unknown error') . "\n";
                 return 1;
             }
         } else {
@@ -68,14 +71,24 @@ function test_dev_full_read() {
     echo "\nTesting read behavior from " . $TARGET . "...\n";
     
     try {
-        $data = file_get_contents($TARGET, false, null, 0, 1024);
-        if ($data === "" || $data === false) {
-            echo "✓ Expected behavior: Read returned EOF immediately.\n";
+        $data = file_get_contents($TARGET, false, null, 0, 100);
+        
+        if ($data === false) {
+            echo "✗ Read operation failed unexpectedly.\n";
+            return 1;
+        }
+        
+        if ($data === str_repeat("\0", strlen($data))) {
+            echo "✓ Expected behavior: Read returned null bytes as expected.\n";
+            echo "  Bytes read: " . strlen($data) . "\n";
+            return 0;
+        } elseif ($data === "") {
+            echo "? Read returned empty data (unexpected but might be system-dependent).\n";
             return 0;
         } else {
-            echo "✗ Unexpected behavior: Read returned " . strlen($data) . " bytes.\n";
-            $display_data = strlen($data) > 100 ? substr($data, 0, 100) . "..." : $data;
-            echo "  Data: " . $display_data . "\n";
+            echo "✗ Unexpected behavior: Read returned non-null data.\n";
+            $display_data = bin2hex(substr($data, 0, 50));
+            echo "  First 50 bytes (hex): " . $display_data . "\n";
             return 1;
         }
     } catch (Exception $ex) {
@@ -90,12 +103,14 @@ function main() {
     $write_result = test_dev_full_write();
     $read_result = test_dev_full_read();
     
-    $overall_result = $write_result || $read_result;
+    $overall_result = ($write_result !== 0 || $read_result !== 0) ? 1 : 0;
     
     print_footer($overall_result);
     exit($overall_result);
 }
 
-main();
+if (basename(__FILE__) === basename($_SERVER['PHP_SELF'])) {
+    main();
+}
 
 ?>
