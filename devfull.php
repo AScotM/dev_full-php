@@ -56,6 +56,14 @@ class DevFullTester {
         return true;
     }
     
+    private function checkForDiskFullError($error) {
+        return strpos($error['message'] ?? '', 'No space left on device') !== false;
+    }
+    
+    private function clear_errors() {
+        @trigger_error('');
+    }
+    
     public function test_write() {
         echo "Attempting to write to " . $this->target . "...\n";
         
@@ -63,51 +71,53 @@ class DevFullTester {
             return 2;
         }
         
-        $context = stream_context_create();
-        $fp = @fopen($this->target, 'w', false, $context);
+        $fp = @fopen($this->target, 'w');
         
         if ($fp === false) {
             echo "Error: Cannot open " . $this->target . " for writing.\n";
             return 1;
         }
         
+        // Clear any previous errors and attempt write
+        $this->clear_errors();
         $bytes_written = @fwrite($fp, $this->test_data);
         $write_error = error_get_last();
         
+        // Clear errors and attempt flush
+        $this->clear_errors();
         $flush_result = @fflush($fp);
         $flush_error = error_get_last();
         
+        // Clear errors and attempt close
+        $this->clear_errors();
         $close_result = @fclose($fp);
         $close_error = error_get_last();
         
+        // Check for the expected disk full error in any operation
+        if ($this->checkForDiskFullError($write_error) ||
+            $this->checkForDiskFullError($flush_error) ||
+            $this->checkForDiskFullError($close_error)) {
+            echo "✓ Expected failure: Disk full simulation successful.\n";
+            echo "  Bytes attempted: " . ($bytes_written ?: 0) . "\n";
+            if ($write_error) echo "  Write error: " . $write_error['message'] . "\n";
+            if ($flush_error) echo "  Flush error: " . $flush_error['message'] . "\n";
+            if ($close_error) echo "  Close error: " . $close_error['message'] . "\n";
+            return 0;
+        }
+        
+        // If bytes_written is false, that's also a failure (though unlikely with /dev/full)
         if ($bytes_written === false) {
             echo "✓ Expected failure: Write returned false.\n";
             echo "  Error: " . ($write_error['message'] ?? 'Unknown error') . "\n";
             return 0;
         }
         
-        if ($flush_result === false) {
-            echo "✓ Expected failure: Flush failed.\n";
-            echo "  Error: " . ($flush_error['message'] ?? 'Unknown error') . "\n";
-            return 0;
-        }
-        
-        if ($close_result === false) {
-            echo "✓ Expected failure: Close failed.\n";
-            echo "  Error: " . ($close_error['message'] ?? 'Unknown error') . "\n";
-            return 0;
-        }
-        
-        if (strpos($write_error['message'] ?? '', 'No space left on device') !== false ||
-            strpos($flush_error['message'] ?? '', 'No space left on device') !== false ||
-            strpos($close_error['message'] ?? '', 'No space left on device') !== false) {
-            echo "✓ Expected failure: Disk full simulation successful.\n";
-            echo "  Bytes attempted: " . $bytes_written . "\n";
-            return 0;
-        }
-        
-        echo "Unexpected result: Write may have succeeded.\n";
-        echo "  Bytes written: " . $bytes_written . "\n";
+        // If we got here without the expected error, something might be wrong
+        echo "Unexpected result: Expected 'No space left on device' error but didn't get it.\n";
+        echo "  Bytes written: " . ($bytes_written ?: 0) . "\n";
+        echo "  Write error: " . ($write_error['message'] ?? 'None') . "\n";
+        echo "  Flush error: " . ($flush_error['message'] ?? 'None') . "\n";
+        echo "  Close error: " . ($close_error['message'] ?? 'None') . "\n";
         return 1;
     }
     
@@ -120,6 +130,7 @@ class DevFullTester {
             return 1;
         }
         
+        $this->clear_errors();
         $data = @fread($fp, 100);
         $read_error = error_get_last();
         fclose($fp);
