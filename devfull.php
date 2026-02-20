@@ -49,8 +49,10 @@ class DevFullTester {
         }
         
         $stat = stat($this->target);
-        if (($stat['mode'] & 0170000) !== 0020000) {
-            echo "Warning: " . $this->target . " may not be a character device.\n";
+        if (defined('S_IFCHR') && defined('S_IFMT')) {
+            if (($stat['mode'] & S_IFMT) !== S_IFCHR) {
+                echo "Warning: " . $this->target . " may not be a character device.\n";
+            }
         }
         
         return true;
@@ -61,7 +63,11 @@ class DevFullTester {
     }
     
     private function clear_errors() {
-        @trigger_error('');
+        if (function_exists('error_clear_last')) {
+            error_clear_last();
+        } else {
+            @trigger_error('');
+        }
     }
     
     public function test_write() {
@@ -78,22 +84,18 @@ class DevFullTester {
             return 1;
         }
         
-        // Clear any previous errors and attempt write
         $this->clear_errors();
         $bytes_written = @fwrite($fp, $this->test_data);
         $write_error = error_get_last();
         
-        // Clear errors and attempt flush
         $this->clear_errors();
         $flush_result = @fflush($fp);
         $flush_error = error_get_last();
         
-        // Clear errors and attempt close
         $this->clear_errors();
         $close_result = @fclose($fp);
         $close_error = error_get_last();
         
-        // Check for the expected disk full error in any operation
         if ($this->checkForDiskFullError($write_error) ||
             $this->checkForDiskFullError($flush_error) ||
             $this->checkForDiskFullError($close_error)) {
@@ -105,14 +107,12 @@ class DevFullTester {
             return 0;
         }
         
-        // If bytes_written is false, that's also a failure (though unlikely with /dev/full)
         if ($bytes_written === false) {
             echo "✓ Expected failure: Write returned false.\n";
             echo "  Error: " . ($write_error['message'] ?? 'Unknown error') . "\n";
             return 0;
         }
         
-        // If we got here without the expected error, something might be wrong
         echo "Unexpected result: Expected 'No space left on device' error but didn't get it.\n";
         echo "  Bytes written: " . ($bytes_written ?: 0) . "\n";
         echo "  Write error: " . ($write_error['message'] ?? 'None') . "\n";
@@ -123,6 +123,11 @@ class DevFullTester {
     
     public function test_read() {
         echo "\nTesting read behavior from " . $this->target . "...\n";
+        
+        if (!file_exists($this->target)) {
+            echo "Error: Target device " . $this->target . " does not exist.\n";
+            return 1;
+        }
         
         $fp = @fopen($this->target, 'r');
         if ($fp === false) {
